@@ -1,0 +1,21 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: npm ci
+      - run: npx playwright-core install --with-deps chromium
+      - run: npm test
+      - run: npx voice-garden-render examples/demo.m4a -o smoke.mp4 --size 320x180 --fps 10 --particles 10000 --duration 2
