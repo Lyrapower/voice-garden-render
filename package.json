@@ -1,0 +1,33 @@
+{
+  "name": "voice-garden-render",
+  "version": "0.1.0",
+  "description": "Render any audio file into an audio-reactive particle video (MP4) from the command line. Frame-exact, offline, Three.js + WebGL.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Lyrapower",
+  "repository": { "type": "git", "url": "git+https://github.com/Lyrapower/voice-garden-render.git" },
+  "homepage": "https://github.com/Lyrapower/voice-garden-render#readme",
+  "bugs": "https://github.com/Lyrapower/voice-garden-render/issues",
+  "keywords": ["audio-visualizer", "audio-reactive", "music-visualizer", "music-video", "particles", "threejs", "webgl", "cli", "ffmpeg", "generative-art"],
+  "bin": { "voice-garden-render": "bin/cli.mjs" },
+  "files": ["bin", "src", "scene-dist", "README.md", "LICENSE"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "vite build",
+    "prepare": "vite build",
+    "demo-audio": "node examples/make-demo-audio.mjs examples/demo.wav",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "meyda": "^5.6.3",
+    "playwright-core": "^1.64.0"
+  },
+  "devDependencies": {
+    "three": "~0.170.0",
+    "@types/three": "~0.170.0",
+    "typescript": "~5.6.2",
+    "vite": "^6.0.1",
+    "vitest": "^3.2.0"
+  }
+}

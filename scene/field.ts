@@ -1,0 +1,224 @@
+// Copied from Lyrapower/voice-garden src/ParticleField.ts (MIT), with Math.random replaced by a seeded generator
+// so a render is the same every time. Keep the shaders in step with voice-garden.
+import * as THREE from 'three';
+
+export function uniform(m: { uniforms: Record<string, THREE.IUniform> }, name: string): THREE.IUniform {
+  const u = m.uniforms[name];
+  if (!u) throw new Error(`missing uniform ${name}`);
+  return u;
+}
+
+/** mulberry32: small, fast, good enough for particle placement. */
+export function seeded(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const vertInstanced = /* glsl */ `
+precision highp float;
+attribute vec3 particleBase;
+attribute float particleSeed;
+// modelViewMatrix, projectionMatrix (and uv) are declared by THREE.ShaderMaterial; redeclaring them fails to compile.
+uniform vec3 uCameraPos;
+uniform float uTime;
+uniform float u_density;
+uniform float u_coherence;
+uniform float u_audioRMS;
+uniform float u_flowSpeed;
+uniform float u_particleScale;
+uniform float u_dispersion;
+uniform float u_colorShift;
+
+varying float vAlpha;
+varying float vGlow;
+varying vec3 vColor;
+varying vec2 vUv;
+
+vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec4 permute(vec4 x) { return mod289(((x * 34.0) + 1.0) * x); }
+vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+
+float snoise(vec3 v) {
+  const vec2 C = vec2(1.0 / 6.0, 1.0 / 3.0);
+  const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+  vec3 i  = floor(v + dot(v, C.yyy));
+  vec3 x0 = v - i + dot(i, C.xxx);
+  vec3 g = step(x0.yzx, x0.xyz);
+  vec3 l = 1.0 - g;
+  vec3 i1 = min(g.xyz, l.zxy);
+  vec3 i2 = max(g.xyz, l.zxy);
+  vec3 x1 = x0 - i1 + C.xxx;
+  vec3 x2 = x0 - i2 + C.yyy;
+  vec3 x3 = x0 - D.yyy;
+  i = mod289(i);
+  vec4 p = permute(permute(permute(
+    i.z + vec4(0.0, i1.z, i2.z, 1.0))
+    + i.y + vec4(0.0, i1.y, i2.y, 1.0))
+    + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+  float n_ = 0.142857142857;
+  vec3 ns = n_ * D.wyz - D.xzx;
+  vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+  vec4 x_ = floor(j * ns.z);
+  vec4 y_ = floor(j - 7.0 * x_);
+  vec4 x = x_ * ns.x + ns.yyyy;
+  vec4 y = y_ * ns.x + ns.yyyy;
+  vec4 h = 1.0 - abs(x) - abs(y);
+  vec4 b0 = vec4(x.xy, y.xy);
+  vec4 b1 = vec4(x.zw, y.zw);
+  vec4 s0 = floor(b0) * 2.0 + 1.0;
+  vec4 s1 = floor(b1) * 2.0 + 1.0;
+  vec4 sh = -step(h, vec4(0.0));
+  vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy;
+  vec4 a1 = b1.xzyw + s1.xzyw * sh.zzww;
+  vec3 p0 = vec3(a0.xy, h.x);
+  vec3 p1 = vec3(a0.zw, h.y);
+  vec3 p2 = vec3(a1.xy, h.z);
+  vec3 p3 = vec3(a1.zw, h.w);
+  vec4 norm = taylorInvSqrt(vec4(dot(p0, p0), dot(p1, p1), dot(p2, p2), dot(p3, p3)));
+  p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+  vec4 m = max(0.6 - vec4(dot(x0, x0), dot(x1, x1), dot(x2, x2), dot(x3, x3)), 0.0);
+  m = m * m;
+  return 42.0 * dot(m * m, vec4(dot(p0, x0), dot(p1, x1), dot(p2, x2), dot(p3, x3)));
+}
+
+vec3 curlNoise(vec3 p) {
+  // Optimized: original computed 18 snoise calls with duplicated gradients; 6 suffice.
+  float e = 0.18;
+  float inv2e = 1.0 / (2.0 * e);
+  float dx = (snoise(p + vec3(e, 0.0, 0.0)) - snoise(p - vec3(e, 0.0, 0.0))) * inv2e;
+  float dy = (snoise(p + vec3(0.0, e, 0.0)) - snoise(p - vec3(0.0, e, 0.0))) * inv2e;
+  float dz = (snoise(p + vec3(0.0, 0.0, e)) - snoise(p - vec3(0.0, 0.0, e))) * inv2e;
+  return vec3(dy - dz, dz - dx, dx - dy);
+}
+
+void main() {
+  vec3 base = particleBase * u_dispersion;
+  float t = uTime * u_flowSpeed * 0.12;
+  vec3 p = base * u_density + vec3(t * 0.3, t * 0.21, t * 0.17);
+  vec3 flow = curlNoise(p) * (6.0 + u_audioRMS * 14.0) * mix(0.35, 1.0, u_coherence);
+  vec3 displaced = base + flow * u_dispersion;
+
+  vec3 worldPos = displaced;
+  vec3 toCam = normalize(uCameraPos - worldPos);
+  vec3 upRef = abs(toCam.y) > 0.95 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+  vec3 right = normalize(cross(upRef, toCam));
+  vec3 up = cross(toCam, right);
+  float s = (0.35 + u_particleScale * 0.55) * (0.85 + 0.3 * particleSeed);
+  vec3 corner = right * position.x * s + up * position.y * s;
+  vec4 mvPosition = modelViewMatrix * vec4(displaced + corner, 1.0);
+  vUv = uv;
+
+  gl_Position = projectionMatrix * mvPosition;
+
+  // fade by distance relative to the camera's orbit, so the falloff holds at any orbit radius
+  float camDist = length(uCameraPos);
+  float depth = smoothstep(camDist + 110.0, camDist - 60.0, -mvPosition.z);
+  vAlpha = 0.13 * mix(0.12, 0.95, depth) * (0.55 + 0.45 * u_coherence); // additive: keep the sum of 100k below white
+  vGlow = 0.25 + u_audioRMS * 0.75 + (1.0 - u_coherence) * 0.15;
+
+  float hue = fract(particleSeed * 0.173 + uTime * 0.02 + u_colorShift * 0.12);
+  vec3 c1 = vec3(0.55, 0.62, 0.78);
+  vec3 c2 = vec3(0.45, 0.72, 0.76);
+  vec3 c3 = vec3(0.58, 0.52, 0.74);
+  vec3 mixCol = mix(mix(c1, c2, hue), c3, smoothstep(0.35, 0.85, hue));
+  vColor = mix(vec3(0.35), mixCol, 0.55 + 0.35 * depth);
+}
+`;
+
+const fragInstanced = /* glsl */ `
+precision highp float;
+varying float vAlpha;
+varying float vGlow;
+varying vec3 vColor;
+varying vec2 vUv;
+
+void main() {
+  vec2 q = vUv * 2.0 - 1.0;
+  float r = length(q);
+  float soft = smoothstep(1.0, 0.2, r);
+  float core = smoothstep(0.82, 0.0, r);
+  float a = soft * vAlpha;
+  vec3 col = vColor * (0.65 + 0.35 * core) + vec3(0.08, 0.1, 0.14) * vGlow * core;
+  if (a < 0.015) discard;
+  gl_FragColor = vec4(col, a);
+}
+`;
+
+/** Note: PointsMaterial-style rendering uses gl_PointCoord; we use Points for soft discs at scale. */
+function fillParticles(count: number, rand: () => number): { positions: Float32Array; seeds: Float32Array } {
+  const positions = new Float32Array(count * 3);
+  const seeds = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    const u = rand();
+    const v = rand();
+    const theta = 2 * Math.PI * u;
+    const phi = Math.acos(2 * v - 1);
+    const r = 18 + rand() * 42;
+    positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+    positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+    positions[i * 3 + 2] = r * Math.cos(phi);
+    seeds[i] = rand();
+  }
+  return { positions, seeds };
+}
+
+/** The voice-garden particle field: curl-noise flow, camera-facing billboard quads, additive blending. */
+export function createParticleInstancedField(count: number, rand: () => number): {
+  mesh: THREE.InstancedMesh;
+  material: THREE.ShaderMaterial;
+  setCount: (n: number) => void;
+  dispose: () => void;
+} {
+  const maxCount = 200_000;
+  const capped = Math.min(maxCount, Math.max(1000, Math.floor(count)));
+  const geo = new THREE.PlaneGeometry(1, 1);
+  const { positions, seeds } = fillParticles(maxCount, rand);
+  geo.setAttribute('particleBase', new THREE.InstancedBufferAttribute(positions, 3));
+  geo.setAttribute('particleSeed', new THREE.InstancedBufferAttribute(seeds, 1));
+
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uCameraPos: { value: new THREE.Vector3() },
+      uTime: { value: 0 },
+      u_density: { value: 1 },
+      u_colorShift: { value: 0 },
+      u_coherence: { value: 1 },
+      u_audioRMS: { value: 0 },
+      u_flowSpeed: { value: 1 },
+      u_particleScale: { value: 1.5 },
+      u_dispersion: { value: 1.5 },
+    },
+    vertexShader: vertInstanced,
+    fragmentShader: fragInstanced,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+  });
+
+  const mesh = new THREE.InstancedMesh(geo, material, maxCount);
+  mesh.frustumCulled = false;
+  mesh.count = capped;
+  // Shader builds billboards from particleBase; instanceMatrix is unused.
+  // Skipping the 200k setMatrixAt loop + upload saves init time and ~12.8MB GPU transfer.
+  mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+
+  return {
+    mesh,
+    material,
+    setCount(n: number) {
+      mesh.count = Math.min(maxCount, Math.max(1000, Math.floor(n)));
+    },
+    dispose() {
+      geo.dispose();
+      material.dispose();
+    },
+  };
+}

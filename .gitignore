@@ -1,0 +1,6 @@
+node_modules/
+scene-dist/
+*.mp4
+!docs/*.mp4
+examples/demo.wav
+.DS_Store
