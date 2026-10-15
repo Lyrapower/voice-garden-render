@@ -78,7 +78,7 @@ Expect `h264` and `aac`, the size you asked for, and a duration that matches the
 ffmpeg -v error -ss <half the duration> -i "<name>.mp4" -frames:v 1 check.png
 ```
 
-It should show a coloured spiral, not a black or white frame. Then give the person the MP4 path, and say which palette and size you used, so they can ask for another.
+It should show coloured particles over a dark sky, not a black or an all-white frame. Then give the person the MP4 path, and say which palette and size you used, so they can ask for another.
 
 ## Notes
 
