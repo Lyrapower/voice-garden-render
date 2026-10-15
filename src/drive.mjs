@@ -7,7 +7,10 @@ export function coherence(voiceHz, otherHz, maxFreq = MAX_FREQ) {
 
 /** The built-in companion stream voice-garden uses when no live server is connected, as a function of time. */
 export function companion(t) {
-  return { aiFreq: 180 + 90 * Math.sin(t * 0.7) + 40 * Math.sin(t * 2.1), aiAmplitude: 0.12 + 0.08 * Math.sin(t * 1.3) ** 2 };
+  return {
+    aiFreq: 220 + 160 * Math.sin(t * 0.5) + 60 * Math.sin(t * 1.7),
+    aiAmplitude: 0.18 + 0.2 * Math.sin(t * 0.9) ** 2 + 0.22 * Math.max(0, Math.sin(t * 3.9)) ** 6,
+  };
 }
 
 /**
@@ -18,7 +21,7 @@ export function drive(features, { fps, frameCount, colorShiftSpeed = 1, audioRea
   if (!Number.isInteger(fps) || fps <= 0) throw new RangeError('fps must be a positive integer');
   if (!Number.isInteger(frameCount) || frameCount < 0) throw new RangeError('frameCount must be a non-negative integer');
   const dt = 1 / fps;
-  const s = { rms: 0, coherence: 1, colorShift: 0 };
+  const s = { rms: 0, coherence: 1, colorShift: 0, tone: 0 };
   let voiceFreq = 400;
   let last = { rms: 0, beat: 0 };
   let k = 0;
@@ -38,12 +41,15 @@ export function drive(features, { fps, frameCount, colorShiftSpeed = 1, audioRea
     s.rms += (targetRms - s.rms) * a;
     s.coherence += (coh - s.coherence) * a;
     s.colorShift += colorShiftSpeed * dt * 0.08;
+    // brighter timbre (higher spectral centroid) leans the palette towards the core colours, slowly
+    const tone = Math.min(1, Math.max(0, (last.spectralCentroid || 0) / 200));
+    s.tone += (tone - s.tone) * (1 - Math.exp(-dt / 1.5));
     const beatPulse = last.beat > 0.5 ? 0.08 : 0;
     out.push({
       t,
       dt,
       u_density: 1 + s.rms * 0.35 + beatPulse + ai.aiAmplitude * 0.2,
-      u_colorShift: s.colorShift % 1000,
+      u_colorShift: (s.colorShift % 1000) + s.tone * 2,
       u_coherence: s.coherence,
       u_audioRMS: s.rms,
     });

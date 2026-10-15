@@ -6,6 +6,8 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { AfterimagePass } from 'three/addons/postprocessing/AfterimagePass.js';
+import { Backdrop } from './backdrop';
 import { createParticleInstancedField, seeded, uniform } from './field';
 
 export type SceneOptions = {
@@ -18,6 +20,10 @@ export type SceneOptions = {
   particleSize: number;
   flowSpeed: number;
   audioReactivity: number;
+  /** four rim-to-core colours as [r, g, b] in 0..1 */
+  palette: [number, number, number][];
+  sky: boolean;
+  trails: number;
 };
 
 export type FrameInput = {
@@ -30,7 +36,8 @@ export type FrameInput = {
 };
 
 const BG = 0x0a0a0f;
-const CAMERA_ORBIT = 150;
+const CAMERA_ORBIT = 120;
+const LOOK_AT = new THREE.Vector3(0, -8, 0);
 const FIELD_RADIUS = 55;
 const FOV = 52;
 
@@ -72,7 +79,11 @@ function init(o: SceneOptions) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(BG);
   const camera = new THREE.PerspectiveCamera(FOV, o.width / o.height, 0.5, 600);
-  camera.position.set(0, 0, orbitFor(camera.aspect));
+  const backdrop = o.sky ? new Backdrop() : null;
+  if (backdrop) {
+    backdrop.bake(renderer, o.width, o.height);
+    scene.add(backdrop.mesh);
+  }
 
   const field = createParticleInstancedField(o.particles, seeded(o.seed));
   scene.add(field.mesh);
@@ -81,7 +92,10 @@ function init(o: SceneOptions) {
   composer.setPixelRatio(1);
   composer.setSize(o.width, o.height);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(o.width, o.height), o.bloom, 0.42, 0.25);
+  // light trails: each frame keeps a fading copy of the previous ones (frames are rendered in order, so this is
+  // still deterministic)
+  if (o.trails > 0) composer.addPass(new AfterimagePass(o.trails));
+  const bloom = new UnrealBloomPass(new THREE.Vector2(o.width, o.height), o.bloom, 0.32, 0.35);
   composer.addPass(bloom);
   const chroma = new ShaderPass(chromaShader);
   uniform(chroma, 'amount').value = 0.001 + 0.004 * Math.min(1, o.audioReactivity);
@@ -93,13 +107,16 @@ function init(o: SceneOptions) {
   const target = new THREE.Vector3();
   const camWorld = new THREE.Vector3();
   const m = field.material;
+  ['uPal0', 'uPal1', 'uPal2', 'uPal3'].forEach((k, i) => uniform(m, k).value.setRGB(...o.palette[i]!));
 
   function frame(f: FrameInput): string {
-    const orbit = f.t * 0.055;
+    // as voice-garden: about 40 degrees above the turning disk, circling slowly; solved from t, so any frame stands alone
+    const orbit = f.t * 0.11;
     const r = orbitFor(camera.aspect) + Math.sin(f.t * 0.35) * 1.8;
-    target.set(Math.cos(orbit) * r, Math.sin(orbit * 0.7) * 4, Math.sin(orbit) * r * 0.85 + 8);
-    camera.position.lerp(target, 1 - Math.exp(-f.dt * 1.8));
-    camera.lookAt(0, 0, 0);
+    const lift = 0.62 + Math.sin(orbit * 0.7) * 0.06;
+    camera.position.copy(target.set(Math.cos(orbit), lift, Math.sin(orbit)).normalize().multiplyScalar(r));
+    camera.lookAt(LOOK_AT);
+    backdrop?.setOrbit(orbit);
     camera.getWorldPosition(camWorld);
 
     uniform(m, 'uCameraPos').value.copy(camWorld);

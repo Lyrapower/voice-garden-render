@@ -1,6 +1,6 @@
 {
   "name": "voice-garden-render",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Render any audio file into an audio-reactive particle video (MP4) from the command line. Frame-exact, offline, Three.js + WebGL.",
   "type": "module",
   "license": "MIT",

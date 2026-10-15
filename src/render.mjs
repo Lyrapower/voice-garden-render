@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { analyze } from './analyze.mjs';
 import { decodeAudio } from './audio.mjs';
-import { DEFAULTS } from './defaults.mjs';
+import { DEFAULTS, paletteOf } from './defaults.mjs';
 import { drive } from './drive.mjs';
 
 const SCENE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'scene-dist');
@@ -96,6 +96,7 @@ export async function render(opts) {
     const { gpu } = await page.evaluate((s) => window.vgr.init(s), {
       width: o.width, height: o.height, particles: o.particles, seed: o.seed, bloom: o.bloom,
       dispersion: o.dispersion, particleSize: o.particleSize, flowSpeed: o.flowSpeed, audioReactivity: o.audioReactivity,
+      palette: paletteOf(o.preset), sky: o.sky, trails: o.trails,
     });
     encoder = startEncoder({ input: o.input, output: o.output, fps: o.fps, width: o.width, height: o.height, start: o.start, duration, crf: o.crf });
     const hashes = [];

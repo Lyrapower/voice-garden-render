@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { basename, extname } from 'node:path';
 import { parseArgs } from 'node:util';
-import { DEFAULTS } from './defaults.mjs';
+import { DEFAULTS, PRESETS, paletteOf } from './defaults.mjs';
 
 export const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 export const HELP = `voice-garden-render ${pkg.version}
@@ -15,6 +15,10 @@ Usage: voice-garden-render <audio> [options]
       --particles <n>      1000-200000 (default ${DEFAULTS.particles})
       --seed <n>           particle layout seed, integer (default ${DEFAULTS.seed}); same seed + same audio = same video
       --bloom <x>          glow strength 0-3 (default ${DEFAULTS.bloom})
+      --palette <p>        ${Object.keys(PRESETS).join(' | ')}, or four colours rim to core:
+                           "#1a2985,#1fc7f2,#eb1fb8,#ff991f" (default ${DEFAULTS.preset})
+      --trails <x>         light-trail persistence 0-0.95, 0 = off (default ${DEFAULTS.trails})
+      --no-sky             plain dark background instead of the night sky
       --start <sec>        start offset in the audio (default 0)
       --duration <sec>     length to render (default: to the end)
       --browser-path <p>   Chromium executable (default: Playwright's; env VGR_BROWSER)
@@ -43,6 +47,7 @@ export function parseCli(argv) {
       output: { type: 'string', short: 'o' }, fps: { type: 'string' }, size: { type: 'string' }, particles: { type: 'string' },
       seed: { type: 'string' }, bloom: { type: 'string' }, start: { type: 'string' }, duration: { type: 'string' },
       'browser-path': { type: 'string' }, software: { type: 'boolean' }, 'hash-frames': { type: 'string' },
+      palette: { type: 'string' }, trails: { type: 'string' }, 'no-sky': { type: 'boolean' },
       help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
     },
   });
@@ -65,6 +70,16 @@ export function parseCli(argv) {
   if (values.bloom !== undefined) o.bloom = num('bloom', values.bloom, { min: 0, max: 3 });
   if (values.start !== undefined) o.start = num('start', values.start, { min: 0, max: 86_400 });
   if (values.duration !== undefined) o.duration = num('duration', values.duration, { min: 0.05, max: 86_400 });
+  if (values.palette !== undefined) {
+    try {
+      paletteOf(values.palette);
+    } catch (e) {
+      throw new UsageError(`--${e.message}`);
+    }
+    o.preset = values.palette;
+  }
+  if (values.trails !== undefined) o.trails = num('trails', values.trails, { min: 0, max: 0.95 });
+  if (values['no-sky']) o.sky = false;
   if (values['browser-path']) o.browserPath = values['browser-path'];
   if (values.software) o.software = true;
   if (values['hash-frames']) o.hashFrames = values['hash-frames'];
